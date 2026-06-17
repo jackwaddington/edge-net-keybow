@@ -19,7 +19,7 @@ def setup():
         _spi = None
 
     try:
-        _buttons = [Button(pin, pull_up=True) for pin in BUTTON_PINS]
+        _buttons = [Button(pin, pull_up=True, bounce_time=0.05) for pin in BUTTON_PINS]
     except Exception as e:
         print(f"Warning: Button setup failed (GPIO not available?): {e}")
         _buttons = []
