@@ -46,3 +46,12 @@ def on_press(callback):
         return lambda: callback(index)
     for i, button in enumerate(_buttons):
         button.when_pressed = make_handler(i)
+
+
+def on_release(callback):
+    if not _buttons:
+        return  # No buttons available, skip
+    def make_handler(index):
+        return lambda: callback(index)
+    for i, button in enumerate(_buttons):
+        button.when_released = make_handler(i)

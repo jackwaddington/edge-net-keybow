@@ -182,9 +182,18 @@ def on_press(index):
 
     topic = config.TOPIC_BUTTON.format(index)
     client.publish(topic, "press")
-    print(f"Button {index} → {topic}")
+    print(f"Button {index} ↓ press → {topic}")
+
+
+def on_release(index):
+    if party_active:
+        return
+    topic = config.TOPIC_BUTTON.format(index)
+    client.publish(topic, "release")
+    print(f"Button {index} ↑ release → {topic}")
 
 hardware.on_press(on_press)
+hardware.on_release(on_release)
 
 # --- Main loop ---
 
