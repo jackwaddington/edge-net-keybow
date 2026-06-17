@@ -1,0 +1,17 @@
+[Unit]
+Description=Edge-NET keybow node (3 buttons + RGB LEDs over MQTT)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# Runs the live deployment at /home/edge/app as the edge service user.
+# Restart=always so a WiFi blip or crash is survived, not fatal; combined with
+# connect_async in main.py the node keeps trying until the broker is reachable.
+ExecStart=/usr/bin/python3 /home/edge/app/main.py
+WorkingDirectory=/home/edge/app
+Restart=always
+RestartSec=3
+User=edge
+
+[Install]
+WantedBy=multi-user.target
