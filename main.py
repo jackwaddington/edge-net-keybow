@@ -48,6 +48,7 @@ PARTY_DURATION = 10.0
 
 press_times = []
 party_active = False
+party_enabled = False  # rainbow off by default; toggled live via MQTT (mode/party)
 party_deadline = 0.0
 party_lock = threading.Lock()
 
@@ -117,6 +118,7 @@ def on_connect(client, userdata, flags, rc):
         print(msg, flush=True)
         with open("/tmp/keybow_debug.log", "a") as f:
             f.write(msg)
+    client.subscribe(config.TOPIC_PARTY_MODE)
 
 def on_disconnect(client, userdata, rc):
     global connected
@@ -126,6 +128,14 @@ def on_disconnect(client, userdata, rc):
         start_breathing()
 
 def on_message(client, userdata, msg):
+    global party_enabled
+    # Mode control first, so "off" can stop a rainbow that's already running.
+    if msg.topic == config.TOPIC_PARTY_MODE:
+        party_enabled = msg.payload.decode().strip().lower() in ("on", "1", "true")
+        print(f"party mode -> {'on' if party_enabled else 'off'}", flush=True)
+        if not party_enabled:
+            stop_party()
+        return
     if party_active:
         return
     topic = msg.topic
@@ -176,7 +186,7 @@ def on_press(index):
         stop_party()
         return
 
-    if record_press():
+    if party_enabled and record_press():
         start_or_extend_party()
         return
 
