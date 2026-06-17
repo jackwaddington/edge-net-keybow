@@ -71,6 +71,7 @@ def stop_party():
 
 
 def run_party():
+    global party_active
     hue = 0.0
     while True:
         with party_lock:
