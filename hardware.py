@@ -1,7 +1,7 @@
 import spidev
 from gpiozero import Button
 
-BUTTON_PINS = [17, 22, 6]
+BUTTON_PINS = [6, 22, 17]  # outer pins swapped so button index matches LED index
 
 _leds = [(0, 0, 0)] * 3
 _spi = None
