@@ -1,0 +1,50 @@
+---
+- name: Deploy keybow node
+  hosts: keybow
+  become: true
+
+  tasks:
+    - name: Enable SPI
+      command: raspi-config nonint do_spi 0
+      changed_when: false
+
+    - name: Install system packages
+      apt:
+        name:
+          - python3-pip
+          - python3-spidev
+          - python3-gpiozero
+        state: present
+        update_cache: true
+
+    - name: Install Python packages
+      pip:
+        name:
+          - paho-mqtt
+        executable: pip3
+
+    - name: Deploy code
+      copy:
+        src: ../
+        dest: /home/pi/keybow/
+        owner: pi
+        group: pi
+        exclude:
+          - .git
+          - ansible
+          - __pycache__
+
+    - name: Install systemd service
+      copy:
+        src: keybow.service
+        dest: /etc/systemd/system/keybow.service
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Enable and start service
+      systemd:
+        name: keybow
+        enabled: true
+        state: restarted
+        daemon_reload: true

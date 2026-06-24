@@ -1,0 +1,13 @@
+[Unit]
+Description=Keybow MQTT node
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/bin/python3 /home/pi/keybow/main.py
+WorkingDirectory=/home/pi/keybow
+Restart=on-failure
+User=pi
+
+[Install]
+WantedBy=multi-user.target
