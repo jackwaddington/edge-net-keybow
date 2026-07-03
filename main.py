@@ -1,211 +1,114 @@
 import time
 import threading
-import colorsys
 import math
 import json
 import hardware
 import paho.mqtt.client as mqtt
 import config
+from colour_mix import ColourMixEngine, rainbow_colour_at
 
 # --- Connection breathing ---
 
 connected = False
-breathing_thread = None
 breathing_lock = threading.Lock()
 
 
 def start_breathing():
-    global breathing_thread
-    with breathing_lock:
-        t = threading.Thread(target=run_breathing, daemon=True)
-        breathing_thread = t
-        t.start()
+    t = threading.Thread(target=run_breathing, daemon=True)
+    t.start()
 
 
 def run_breathing():
     start = time.time()
     while True:
         with breathing_lock:
-            if connected or party_active:
+            if connected:
                 break
         elapsed = time.time() - start
-        # Sine wave: 0..1..0 over 3 seconds
         brightness = (math.sin(elapsed * math.pi * 2 / 3) + 1) / 2
-        brightness = brightness ** 2  # ease in — subtle, not punchy
-        v = int(brightness * 40)      # dim blue, not bright
+        brightness = brightness ** 2
+        v = int(brightness * 40)
         for i in range(3):
             hardware.set_led(i, 0, 0, v)
         hardware.show()
         time.sleep(0.05)
-    all_leds_off()
+    refresh_key_leds()
 
 
-# --- Party mode ---
-
-PARTY_TRIGGER_COUNT = 4
-PARTY_TRIGGER_WINDOW = 3.0
-PARTY_DURATION = 10.0
-
-press_times = []
-party_active = False
-party_enabled = False  # rainbow off by default; toggled live via MQTT (mode/party)
-party_deadline = 0.0
-party_lock = threading.Lock()
-
-
-def start_or_extend_party():
-    global party_active, party_deadline
-    with party_lock:
-        party_deadline = time.time() + PARTY_DURATION
-        if not party_active:
-            party_active = True
-            client.publish(config.TOPIC_PARTY, "start")
-            threading.Thread(target=run_party, daemon=True).start()
-
-
-def stop_party():
-    global party_active
-    with party_lock:
-        party_active = False
-    all_leds_off()
-    client.publish(config.TOPIC_PARTY, "stop")
-
-
-def run_party():
-    global party_active
-    hue = 0.0
-    while True:
-        with party_lock:
-            if not party_active or time.time() > party_deadline:
-                party_active = False
-                break
-        hue = (hue + 0.05) % 1.0
-        for i in range(3):
-            r, g, b = colorsys.hsv_to_rgb((hue + i * 0.33) % 1.0, 1.0, 1.0)
-            hardware.set_led(i, int(r * 255), int(g * 255), int(b * 255))
-        hardware.show()
-        time.sleep(0.05)
-    all_leds_off()
-
-
-def all_leds_off():
+def refresh_key_leds():
     for i in range(3):
-        hardware.set_led(i, 0, 0, 0)
+        r, g, b = engine.key_colour(i)
+        hardware.set_led(i, r, g, b)
     hardware.show()
 
 
-def record_press():
-    now = time.time()
-    press_times.append(now)
-    cutoff = now - PARTY_TRIGGER_WINDOW
-    while press_times and press_times[0] < cutoff:
-        press_times.pop(0)
-    return len(press_times) >= PARTY_TRIGGER_COUNT
+# --- Colour-mix engine ---
+
+def on_lamp_change(rgb):
+    r, g, b = rgb
+    client.publish(config.TOPIC_LAMP, json.dumps({"rgb": [r, g, b]}), retain=True)
+    refresh_key_leds()
+
+
+engine = ColourMixEngine(on_change=on_lamp_change)
 
 
 # --- MQTT ---
 
-def on_connect(client, userdata, flags, rc):
+def on_connect(c, userdata, flags, rc):
     global connected
-    msg = f"Connected to broker (rc={rc})\n"
-    print(msg, flush=True)
-    with open("/tmp/keybow_debug.log", "a") as f:
-        f.write(msg)
+    print(f"Connected to broker (rc={rc})", flush=True)
     connected = True
-    for i in range(3):
-        client.subscribe(config.TOPIC_LED.format(i))
-        msg = f"Subscribed to {config.TOPIC_LED.format(i)}\n"
-        print(msg, flush=True)
-        with open("/tmp/keybow_debug.log", "a") as f:
-            f.write(msg)
-    client.subscribe(config.TOPIC_PARTY_MODE)
+    r, g, b = engine.lamp_colour
+    client.publish(config.TOPIC_LAMP, json.dumps({"rgb": [r, g, b]}), retain=True)
+    refresh_key_leds()
 
-def on_disconnect(client, userdata, rc):
+
+def on_disconnect(c, userdata, rc):
     global connected
-    print(f"Disconnected from broker (rc={rc})")
+    print(f"Disconnected from broker (rc={rc})", flush=True)
     connected = False
-    if not party_active:
-        start_breathing()
+    start_breathing()
 
-def on_message(client, userdata, msg):
-    global party_enabled
-    # Mode control first, so "off" can stop a rainbow that's already running.
-    if msg.topic == config.TOPIC_PARTY_MODE:
-        party_enabled = msg.payload.decode().strip().lower() in ("on", "1", "true")
-        print(f"party mode -> {'on' if party_enabled else 'off'}", flush=True)
-        if not party_enabled:
-            stop_party()
-        return
-    if party_active:
-        return
-    topic = msg.topic
-    payload = msg.payload.decode().strip()
-    msg_text = f"on_message: topic={topic}, payload={payload}\n"
-    print(msg_text, flush=True)
-    with open("/tmp/keybow_debug.log", "a") as f:
-        f.write(msg_text)
-    for i in range(3):
-        if topic == config.TOPIC_LED.format(i):
-            try:
-                # Support both JSON {"rgb": [r, g, b]} and comma-separated "r,g,b"
-                if payload.startswith("{"):
-                    data = json.loads(payload)
-                    r, g, b = data.get("rgb", [0, 0, 0])
-                else:
-                    r, g, b = (int(x) for x in payload.split(","))
-                led_msg = f"Setting LED {i} to RGB({r},{g},{b})\n"
-                print(led_msg, flush=True)
-                with open("/tmp/keybow_debug.log", "a") as f:
-                    f.write(led_msg)
-                hardware.set_led(i, r, g, b)
-                hardware.show()
-            except (ValueError, json.JSONDecodeError) as e:
-                err_msg = f"Bad LED payload: {payload} - {e}\n"
-                print(err_msg, flush=True)
-                with open("/tmp/keybow_debug.log", "a") as f:
-                    f.write(err_msg)
 
 client = mqtt.Client()
 client.on_connect = on_connect
 client.on_disconnect = on_disconnect
-client.on_message = on_message
 
 hardware.setup()
-start_breathing()  # breathe until connected
-# connect_async + loop_start: keep retrying in the background and auto-reconnect
-# after drops, instead of crashing on a single failed attempt. The Pi Zero's
-# WiFi to the AP is flaky, so the node must survive blips, not die on them.
+start_breathing()
 client.reconnect_delay_set(min_delay=1, max_delay=20)
 client.connect_async(config.BROKER, config.PORT)
 client.loop_start()
 
+
 # --- Button handling ---
 
 def on_press(index):
-    if party_active:
-        stop_party()
-        return
-
-    if party_enabled and record_press():
-        start_or_extend_party()
-        return
-
-    topic = config.TOPIC_BUTTON.format(index)
-    client.publish(topic, "press")
-    print(f"Button {index} ↓ press → {topic}")
+    engine.on_key_down(index)
+    refresh_key_leds()
+    client.publish(config.TOPIC_BUTTON.format(index), "press")
+    print(f"Button {index} ↓", flush=True)
 
 
 def on_release(index):
-    if party_active:
-        return
-    topic = config.TOPIC_BUTTON.format(index)
-    client.publish(topic, "release")
-    print(f"Button {index} ↑ release → {topic}")
+    engine.on_key_up(index)
+    refresh_key_leds()
+    client.publish(config.TOPIC_BUTTON.format(index), "release")
+    print(f"Button {index} ↑  lamp={engine.lamp_colour}", flush=True)
+
 
 hardware.on_press(on_press)
 hardware.on_release(on_release)
 
+
 # --- Main loop ---
 
 while True:
-    time.sleep(1)
+    now = time.monotonic()
+    engine.tick(now=now)
+    if engine.is_mashing:
+        r, g, b = rainbow_colour_at(now)
+        client.publish(config.TOPIC_LAMP, json.dumps({"rgb": [r, g, b]}))
+        refresh_key_leds()
+    time.sleep(0.05)
