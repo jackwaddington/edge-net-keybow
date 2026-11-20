@@ -1,4 +1,4 @@
-BROKER = "10.1.1.1"
+BROKER = "192.168.0.236"
 PORT   = 1883
 
 # Topics this node publishes to
